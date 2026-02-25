@@ -1,0 +1,292 @@
+{% extends "base.html" %}
+{% block title %}Accessibility Report — {{ data.filename }}{% endblock %}
+
+{% block content %}
+{# ── Inline JSON data for the JS layer ──────────────────────────────── #}
+<script id="report-data" type="application/json">
+{
+  "sessionId": {{ session_id | tojson }},
+  "pageCount": {{ data.page_count }},
+  "pageDims": {{ data.page_dims | tojson }},
+  "issues": {{ data.issues | tojson }},
+  "score": {{ data.score }}
+}
+</script>
+
+{# ── Top bar ──────────────────────────────────────────────────────────── #}
+<div class="report-topbar bg-white border-bottom px-3 py-2 d-flex align-items-center gap-3 flex-wrap">
+  <div class="d-flex align-items-center gap-2 flex-grow-1">
+    <i class="bi bi-file-earmark-pdf text-danger fs-5" aria-hidden="true"></i>
+    <span class="fw-semibold text-truncate" style="max-width:300px"
+          title="{{ data.filename }}">{{ data.filename }}</span>
+    <span class="badge bg-secondary">{{ data.page_count }} page{{ 's' if data.page_count != 1 }}</span>
+  </div>
+
+  {# Score gauge #}
+  <div class="d-flex align-items-center gap-2">
+    <span class="text-muted small">Accessibility Score</span>
+    <div id="score-badge"
+         class="score-badge {% if data.score >= 80 %}score-pass{% elif data.score >= 50 %}score-warn{% else %}score-fail{% endif %}"
+         aria-label="Accessibility score: {{ data.score }} out of 100"
+         title="{{ data.score }}/100">
+      {{ data.score }}
+    </div>
+    <span class="text-muted small">/&nbsp;100</span>
+  </div>
+
+  {# Summary counts #}
+  {% set critical = data.issues | selectattr('severity','eq','critical') | list | length %}
+  {% set serious  = data.issues | selectattr('severity','eq','serious')  | list | length %}
+  {% set moderate = data.issues | selectattr('severity','eq','moderate') | list | length %}
+  {% set minor    = data.issues | selectattr('severity','eq','minor')    | list | length %}
+  <div class="d-flex gap-2 flex-wrap" aria-label="Issue summary">
+    {% if critical %}<span class="badge bg-danger">{{ critical }} Critical</span>{% endif %}
+    {% if serious  %}<span class="badge bg-orange text-white">{{ serious }} Serious</span>{% endif %}
+    {% if moderate %}<span class="badge bg-warning text-dark">{{ moderate }} Moderate</span>{% endif %}
+    {% if minor    %}<span class="badge bg-secondary">{{ minor }} Minor</span>{% endif %}
+    {% if not data.issues %}
+    <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>No Issues Found</span>
+    {% endif %}
+  </div>
+
+  <div class="ms-auto d-flex gap-2">
+    <a href="{{ url_for('download', session_id=session_id) }}"
+       class="btn btn-sm btn-outline-secondary"
+       aria-label="Download remediated PDF">
+      <i class="bi bi-download me-1" aria-hidden="true"></i>Download PDF
+    </a>
+    <a href="{{ url_for('index') }}" class="btn btn-sm btn-outline-primary">
+      <i class="bi bi-arrow-left me-1" aria-hidden="true"></i>New Upload
+    </a>
+  </div>
+</div>
+
+{# ── Main split layout ────────────────────────────────────────────────── #}
+<div class="report-body d-flex" style="height: calc(100vh - 114px);">
+
+  {# ── LEFT: PDF Viewer ───────────────────────────────────────────────── #}
+  <div class="pdf-panel border-end bg-light d-flex flex-column" style="width:55%; min-width:300px;">
+    {# Page navigation #}
+    <div class="viewer-toolbar d-flex align-items-center gap-2 px-3 py-2 bg-white border-bottom">
+      <button id="btn-prev" class="btn btn-sm btn-outline-secondary" aria-label="Previous page" disabled>
+        <i class="bi bi-chevron-left" aria-hidden="true"></i>
+      </button>
+      <span class="small">
+        Page <span id="current-page">1</span> of
+        <span id="total-pages">{{ data.page_count }}</span>
+      </span>
+      <button id="btn-next" class="btn btn-sm btn-outline-secondary" aria-label="Next page"
+              {% if data.page_count <= 1 %}disabled{% endif %}>
+        <i class="bi bi-chevron-right" aria-hidden="true"></i>
+      </button>
+      <div class="ms-auto form-check form-switch mb-0">
+        <input class="form-check-input" type="checkbox" id="toggle-highlights" checked
+               aria-label="Toggle issue highlights" />
+        <label class="form-check-label small" for="toggle-highlights">Highlights</label>
+      </div>
+    </div>
+
+    {# Canvas container #}
+    <div class="flex-grow-1 overflow-auto d-flex justify-content-center align-items-start p-3"
+         id="canvas-container">
+      <div class="position-relative d-inline-block" id="page-wrapper">
+        <img id="page-image"
+             src="{{ url_for('get_page', session_id=session_id, page_num=0) }}"
+             alt="Page 1 of {{ data.filename }}"
+             class="d-block shadow"
+             style="max-width:100%" />
+        <canvas id="overlay-canvas"
+                class="position-absolute top-0 start-0"
+                aria-hidden="true"
+                style="pointer-events:none"></canvas>
+      </div>
+    </div>
+  </div>
+
+  {# ── RIGHT: Issues panel ────────────────────────────────────────────── #}
+  <div class="issues-panel d-flex flex-column flex-grow-1 overflow-hidden">
+
+    {# Filter / sort bar #}
+    <div class="issues-toolbar bg-white border-bottom px-3 py-2 d-flex align-items-center gap-2 flex-wrap">
+      <span class="fw-semibold me-1">Issues</span>
+      <select id="filter-severity" class="form-select form-select-sm" style="width:auto"
+              aria-label="Filter by severity">
+        <option value="">All severities</option>
+        <option value="critical">Critical</option>
+        <option value="serious">Serious</option>
+        <option value="moderate">Moderate</option>
+        <option value="minor">Minor</option>
+      </select>
+      <select id="filter-page" class="form-select form-select-sm" style="width:auto"
+              aria-label="Filter by page">
+        <option value="">All pages</option>
+        <option value="0">Document-level</option>
+        {% for p in range(1, data.page_count + 1) %}
+        <option value="{{ p }}">Page {{ p }}</option>
+        {% endfor %}
+      </select>
+      <span id="issue-count" class="badge bg-secondary ms-auto"
+            aria-live="polite" aria-atomic="true">
+        {{ data.issues | length }} issue{{ 's' if data.issues | length != 1 }}
+      </span>
+    </div>
+
+    {# Issue list #}
+    <div class="flex-grow-1 overflow-auto p-3" id="issue-list-container" role="region"
+         aria-label="Accessibility issues list" aria-live="polite">
+
+      {% if not data.issues %}
+      <div class="text-center py-5 text-muted">
+        <i class="bi bi-check-circle-fill text-success fs-1" aria-hidden="true"></i>
+        <p class="mt-3 fw-semibold">No accessibility issues detected!</p>
+        <p class="small">This PDF appears to meet WCAG 2.1 AA requirements for the checks performed.</p>
+      </div>
+      {% endif %}
+
+      <div id="issue-list">
+        {% for issue in data.issues %}
+        {% set sev_class = {
+          'critical': 'danger',
+          'serious':  'orange',
+          'moderate': 'warning',
+          'minor':    'secondary'
+        }.get(issue.severity, 'secondary') %}
+        <div class="issue-card card mb-2 shadow-sm issue-sev-{{ issue.severity }}"
+             data-issue-id="{{ issue.issue_id }}"
+             data-page="{{ issue.page }}"
+             data-severity="{{ issue.severity }}"
+             data-rect="{{ issue.rect | tojson if issue.rect else 'null' }}">
+          <div class="card-body p-3">
+
+            {# Header row #}
+            <div class="d-flex align-items-start gap-2 mb-1">
+              <span class="badge bg-{{ sev_class }} text-{{ 'dark' if issue.severity == 'moderate' else 'white' }} flex-shrink-0">
+                {{ issue.severity | capitalize }}
+              </span>
+              <div class="flex-grow-1">
+                <div class="fw-semibold lh-sm">{{ issue.title }}</div>
+                <div class="text-muted small">
+                  WCAG {{ issue.wcag_criterion }} &mdash; {{ issue.wcag_title }}
+                  <span class="badge bg-light text-dark border ms-1">Level {{ issue.level }}</span>
+                  {% if issue.page == 0 %}
+                  <span class="badge bg-info text-dark ms-1">Document</span>
+                  {% else %}
+                  <button class="btn btn-link btn-sm p-0 ms-1 goto-page text-decoration-none"
+                          data-page="{{ issue.page }}"
+                          aria-label="Go to page {{ issue.page }}">
+                    <i class="bi bi-arrow-right-circle" aria-hidden="true"></i> p.{{ issue.page }}
+                  </button>
+                  {% endif %}
+                </div>
+              </div>
+              <button class="btn btn-sm btn-outline-secondary flex-shrink-0 toggle-details"
+                      aria-expanded="false"
+                      aria-controls="details-{{ issue.issue_id }}"
+                      data-bs-toggle="collapse"
+                      data-bs-target="#details-{{ issue.issue_id }}">
+                <i class="bi bi-chevron-down" aria-hidden="true"></i>
+              </button>
+            </div>
+
+            {# Collapsible details #}
+            <div class="collapse" id="details-{{ issue.issue_id }}">
+              <hr class="my-2" />
+              <p class="small mb-2">{{ issue.description }}</p>
+              <div class="alert alert-secondary py-2 small mb-2">
+                <i class="bi bi-tools me-1" aria-hidden="true"></i>
+                <strong>How to fix:</strong> {{ issue.remediation }}
+              </div>
+
+              {# Auto-fix form for title #}
+              {% if issue.auto_fixable and issue.element_info.get('field') == 'title' %}
+              <form class="fix-form d-flex gap-2" data-action="fix_title">
+                <input type="text" class="form-control form-control-sm fix-input"
+                       placeholder="Enter document title"
+                       value="{{ data.metadata.get('title', '') }}"
+                       aria-label="New document title"
+                       name="title" required />
+                <button type="submit" class="btn btn-sm btn-success flex-shrink-0">
+                  <i class="bi bi-check-lg me-1" aria-hidden="true"></i>Fix
+                </button>
+              </form>
+              {% endif %}
+
+              {# Auto-fix form for language #}
+              {% if issue.auto_fixable and issue.element_info.get('field') == 'language' %}
+              <form class="fix-form d-flex gap-2" data-action="fix_language">
+                <select class="form-select form-select-sm fix-input"
+                        aria-label="Document language"
+                        name="language">
+                  {% set current_lang = data.metadata.get('language', '') %}
+                  {% for code, name in [
+                    ('en-US','English (US)'), ('en-GB','English (UK)'),
+                    ('fr-FR','French'), ('de-DE','German'), ('es-ES','Spanish'),
+                    ('it-IT','Italian'), ('pt-BR','Portuguese (Brazil)'),
+                    ('nl-NL','Dutch'), ('ja-JP','Japanese'), ('zh-CN','Chinese (Simplified)'),
+                    ('ar-SA','Arabic'), ('ko-KR','Korean'),
+                  ] %}
+                  <option value="{{ code }}" {% if current_lang == code %}selected{% endif %}>{{ name }}</option>
+                  {% endfor %}
+                </select>
+                <button type="submit" class="btn btn-sm btn-success flex-shrink-0">
+                  <i class="bi bi-check-lg me-1" aria-hidden="true"></i>Fix
+                </button>
+              </form>
+              {% endif %}
+
+              {# Fix confirmation message (hidden until used) #}
+              <div class="fix-result alert py-1 small d-none mt-2" role="alert"></div>
+
+              {# WCAG help link #}
+              {% if issue.wcag_criterion in wcag_rules %}
+              <a href="{{ wcag_rules[issue.wcag_criterion].help_url }}"
+                 target="_blank" rel="noopener"
+                 class="small text-muted">
+                <i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i>
+                WCAG {{ issue.wcag_criterion }} Understanding
+              </a>
+              {% endif %}
+            </div>
+
+          </div>
+        </div>
+        {% endfor %}
+      </div>{# /issue-list #}
+    </div>
+
+    {# Metadata summary #}
+    <div class="border-top bg-white px-3 py-2">
+      <details>
+        <summary class="small text-muted" style="cursor:pointer">
+          <i class="bi bi-info-circle me-1" aria-hidden="true"></i>Document Metadata
+        </summary>
+        <table class="table table-sm table-borderless small mt-2 mb-0">
+          <tbody>
+            {% for k, v in data.metadata.items() %}
+            {% if v %}
+            <tr>
+              <th scope="row" class="text-muted fw-normal ps-0" style="width:35%">{{ k | capitalize }}</th>
+              <td class="text-break">{{ v }}</td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </details>
+    </div>
+
+  </div>{# /issues-panel #}
+</div>{# /report-body #}
+
+{# Toast for fix messages #}
+<div class="toast-container position-fixed bottom-0 end-0 p-3" aria-live="polite">
+  <div id="fix-toast" class="toast align-items-center text-bg-success border-0" role="status" aria-live="polite" aria-atomic="true">
+    <div class="d-flex">
+      <div class="toast-body" id="fix-toast-body"></div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto"
+              data-bs-dismiss="toast" aria-label="Close"></button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
