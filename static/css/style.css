@@ -1,0 +1,94 @@
+/* PDF Accessibility Engine — custom styles */
+
+/* ── Drop zone ───────────────────────────────────────────────────────── */
+.drop-zone {
+  background-color: #f8f9ff;
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s;
+  border-color: #6c8ebf !important;
+}
+.drop-zone:hover,
+.drop-zone.drag-over {
+  background-color: #e8edff;
+  border-color: #0d6efd !important;
+}
+.drop-zone:focus {
+  outline: 3px solid #0d6efd;
+  outline-offset: 2px;
+}
+
+/* ── Score badge ──────────────────────────────────────────────────────── */
+.score-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 50%;
+  font-weight: 700;
+  font-size: 1rem;
+  color: #fff;
+}
+.score-pass  { background-color: #198754; }
+.score-warn  { background-color: #fd7e14; }
+.score-fail  { background-color: #dc3545; }
+
+/* ── Report layout ────────────────────────────────────────────────────── */
+.report-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+
+/* ── Issue severity colours ───────────────────────────────────────────── */
+.issue-sev-critical  { border-left: 4px solid #dc3545 !important; }
+.issue-sev-serious   { border-left: 4px solid #fd7e14 !important; }
+.issue-sev-moderate  { border-left: 4px solid #ffc107 !important; }
+.issue-sev-minor     { border-left: 4px solid #adb5bd !important; }
+
+/* Orange badge (not in Bootstrap by default) */
+.bg-orange { background-color: #fd7e14 !important; }
+
+/* ── Overlay canvas ───────────────────────────────────────────────────── */
+#overlay-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+/* ── Viewer ───────────────────────────────────────────────────────────── */
+#page-image {
+  display: block;
+  width: 100%;
+}
+#page-wrapper {
+  width: 100%;
+  max-width: 850px;
+}
+
+/* ── Scrollable panels ────────────────────────────────────────────────── */
+.pdf-panel,
+.issues-panel {
+  overflow: hidden;
+}
+
+/* ── Issue card hover ─────────────────────────────────────────────────── */
+.issue-card {
+  transition: box-shadow 0.15s;
+}
+.issue-card:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,.12) !important;
+}
+.issue-card.highlighted {
+  box-shadow: 0 0 0 3px #0d6efd !important;
+}
+
+/* ── Dashed border utility ────────────────────────────────────────────── */
+.border-dashed {
+  border-style: dashed !important;
+}
+
+/* ── Footer ───────────────────────────────────────────────────────────── */
+.footer {
+  font-size: 0.85rem;
+}

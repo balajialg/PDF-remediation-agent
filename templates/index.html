@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Upload PDF — PDF Accessibility Engine{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+  <div class="row justify-content-center">
+    <div class="col-lg-7">
+
+      <div class="text-center mb-4">
+        <span class="display-1 text-primary" aria-hidden="true">
+          <i class="bi bi-file-earmark-pdf"></i>
+        </span>
+        <h1 class="h2 mt-2">PDF Accessibility Engine</h1>
+        <p class="lead text-muted">
+          Upload a PDF to evaluate it against
+          <strong>WCAG 2.1 AA</strong> accessibility guidelines and
+          receive an interactive remediation report.
+        </p>
+      </div>
+
+      <!-- Upload card -->
+      <div class="card shadow-sm">
+        <div class="card-body p-4">
+          <form id="upload-form"
+                action="{{ url_for('analyze') }}"
+                method="post"
+                enctype="multipart/form-data"
+                aria-label="PDF upload form">
+
+            <!-- Drop zone -->
+            <div id="drop-zone"
+                 class="drop-zone rounded-3 border border-2 border-dashed p-5 text-center mb-3"
+                 role="region"
+                 aria-label="File drop zone"
+                 tabindex="0">
+              <i class="bi bi-cloud-arrow-up fs-1 text-primary" aria-hidden="true"></i>
+              <p class="mb-1 fw-semibold" id="drop-label">Drag &amp; drop your PDF here</p>
+              <p class="text-muted small mb-3">or click to browse</p>
+              <input type="file"
+                     id="file-input"
+                     name="file"
+                     accept=".pdf"
+                     class="visually-hidden"
+                     aria-label="Choose PDF file"
+                     required />
+              <button type="button"
+                      class="btn btn-outline-primary btn-sm"
+                      onclick="document.getElementById('file-input').click()">
+                <i class="bi bi-folder2-open me-1" aria-hidden="true"></i>
+                Browse Files
+              </button>
+            </div>
+
+            <!-- Selected file name -->
+            <div id="file-info" class="alert alert-info py-2 d-none" role="status">
+              <i class="bi bi-file-earmark-pdf me-1" aria-hidden="true"></i>
+              <span id="file-name"></span>
+            </div>
+
+            <!-- Submit -->
+            <div class="d-grid">
+              <button type="submit"
+                      id="submit-btn"
+                      class="btn btn-primary btn-lg"
+                      disabled
+                      aria-describedby="submit-help">
+                <span id="submit-spinner"
+                      class="spinner-border spinner-border-sm me-2 d-none"
+                      role="status"
+                      aria-hidden="true"></span>
+                <i class="bi bi-shield-check me-2" aria-hidden="true" id="submit-icon"></i>
+                Evaluate Accessibility
+              </button>
+              <div id="submit-help" class="form-text text-center mt-1">
+                Supported format: PDF. Maximum file size: 50 MB.
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- What we check -->
+      <div class="card mt-4 shadow-sm">
+        <div class="card-header bg-transparent fw-semibold">
+          <i class="bi bi-list-check me-2 text-primary" aria-hidden="true"></i>
+          WCAG 2.1 AA Checks Performed
+        </div>
+        <ul class="list-group list-group-flush" aria-label="Accessibility checks performed">
+          {% set checks = [
+            ("1.1.1", "Non-text Content", "bi-image", "A", "Images and non-text elements"),
+            ("1.3.1", "Info and Relationships", "bi-diagram-3", "A", "Document tagging and structure"),
+            ("1.3.2", "Meaningful Sequence", "bi-sort-down", "A", "Reading order and tab order"),
+            ("1.4.3", "Contrast (Minimum)", "bi-circle-half", "AA", "Text/background colour contrast"),
+            ("2.4.2", "Page Titled", "bi-fonts", "A", "Document title metadata"),
+            ("2.4.4", "Link Purpose", "bi-link-45deg", "A", "Descriptive link text"),
+            ("2.4.5", "Multiple Ways", "bi-bookmark-star", "AA", "Bookmarks and navigation"),
+            ("2.4.6", "Headings and Labels", "bi-type-h1", "AA", "Heading structure"),
+            ("3.1.1", "Language of Page", "bi-translate", "A", "Document language setting"),
+            ("4.1.2", "Name, Role, Value", "bi-input-cursor-text", "A", "Form field labels"),
+          ] %}
+          {% for criterion, title, icon, level, desc in checks %}
+          <li class="list-group-item d-flex align-items-center gap-3 py-2">
+            <i class="bi {{ icon }} text-primary fs-5" aria-hidden="true"></i>
+            <div class="flex-grow-1">
+              <span class="fw-medium">{{ title }}</span>
+              <span class="text-muted small ms-1">&mdash; {{ desc }}</span>
+            </div>
+            <span class="badge {% if level == 'A' %}bg-success{% else %}bg-warning text-dark{% endif %} badge-sm">
+              {{ level }}
+            </span>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+
+    </div>
+  </div>
+</div>
+{% endblock %}
