@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import math
 import uuid
 from dataclasses import dataclass, field
@@ -9,7 +10,18 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import fitz  # PyMuPDF
 
+try:
+    from PIL import Image
+    import pytesseract
+
+    _OCR_AVAILABLE = True
+except ImportError:
+    _OCR_AVAILABLE = False
+
 from .wcag_rules import WCAG_RULES, SCORED_CRITERIA
+
+# Minimum number of characters OCR must find to consider an image as text
+_MIN_OCR_TEXT_LENGTH = 20
 
 
 @dataclass
@@ -83,6 +95,7 @@ class PDFAccessibilityAnalyzer:
         self._check_document_language()
         self._check_tagged_pdf()
         self._check_bookmarks()
+        self._check_scanned_content()
         self._check_images_alt_text()
         self._check_color_contrast()
         self._check_form_fields()
@@ -299,6 +312,20 @@ class PDFAccessibilityAnalyzer:
                 rects = page.get_image_rects(xref)
                 rect = list(rects[0]) if rects else None
 
+                # --- OCR-based scanned-text detection ---
+                # If the image covers most of the page, it is likely a scanned
+                # page rather than an embedded illustration.  Use OCR to check
+                # whether the image contains text and skip it if it does.
+                if self._is_full_page_image(page, width, height, rects):
+                    # Page already has extractable text (previously OCR'd)
+                    page_text = page.get_text("text").strip()
+                    if page_text:
+                        continue
+
+                    # Try OCR to detect text in the image
+                    if self._ocr_image_has_text(page, xref):
+                        continue
+
                 if not tagged:
                     severity = "critical"
                     desc = (
@@ -338,6 +365,58 @@ class PDFAccessibilityAnalyzer:
                     },
                 )
 
+    # ------------------------------------------------------------------
+    # Check: scanned content needing OCR (WCAG 1.3.1)
+    # ------------------------------------------------------------------
+
+    def _check_scanned_content(self) -> None:
+        """Flag pages that appear to be scanned images without a text layer."""
+        for page_num in range(self.doc.page_count):
+            page = self.doc[page_num]
+            page_text = page.get_text("text").strip()
+            if page_text:
+                continue  # Page has extractable text — no OCR needed
+
+            images = page.get_images(full=True)
+            if not images:
+                continue
+
+            has_full_page_image = False
+            for img_info in images:
+                xref, _, width, height = img_info[0], img_info[1], img_info[2], img_info[3]
+                rects = page.get_image_rects(xref)
+                if self._is_full_page_image(page, width, height, rects):
+                    has_full_page_image = True
+                    break
+
+            if not has_full_page_image:
+                continue
+
+            self._add(
+                wcag_criterion="1.3.1",
+                severity="critical",
+                page=page_num + 1,
+                title="Scanned Page Needs OCR and Tagging",
+                description=(
+                    f"Page {page_num + 1} appears to be a scanned image without "
+                    "a text layer. The content cannot be read by screen readers "
+                    "or searched. OCR (Optical Character Recognition) must be "
+                    "performed to extract text, followed by auto-tagging to add "
+                    "document structure."
+                ),
+                remediation=(
+                    "Use the OCR & Auto-Tag remediation action to process this "
+                    "document, or use a tool like Adobe Acrobat Pro to run "
+                    "'Recognize Text' (OCR) followed by 'Auto-Tag Document'."
+                ),
+                auto_fixable=True,
+                element_info={
+                    "type": "scanned_page",
+                    "page": page_num + 1,
+                    "needs_ocr": True,
+                },
+            )
+
     def _collect_figure_alt_xrefs(self) -> set:
         """
         Walk the PDF's xref table and return xrefs of images that are
@@ -362,6 +441,41 @@ class PDFAccessibilityAnalyzer:
         except Exception:
             pass
         return xrefs_with_alt
+
+    def _is_full_page_image(
+        self,
+        page: fitz.Page,
+        img_width: int,
+        img_height: int,
+        rects: list,
+    ) -> bool:
+        """Return True if the image covers at least 75 % of the page area."""
+        page_area = page.rect.width * page.rect.height
+        if page_area == 0:
+            return False
+
+        if rects:
+            img_rect = fitz.Rect(rects[0])
+            img_area = img_rect.width * img_rect.height
+        else:
+            img_area = img_width * img_height
+
+        return img_area / page_area >= 0.75
+
+    def _ocr_image_has_text(self, page: fitz.Page, xref: int) -> bool:
+        """Use OCR to check whether the image at *xref* contains text."""
+        if not _OCR_AVAILABLE:
+            return False
+        try:
+            pix = fitz.Pixmap(self.doc, xref)
+            # Convert CMYK / gray+alpha to RGB so PIL can handle it
+            if pix.n not in (1, 3):
+                pix = fitz.Pixmap(fitz.csRGB, pix)
+            img = Image.open(io.BytesIO(pix.tobytes("png")))
+            text = pytesseract.image_to_string(img).strip()
+            return len(text) > _MIN_OCR_TEXT_LENGTH  # meaningful amount of text
+        except Exception:
+            return False
 
     # ------------------------------------------------------------------
     # Check: colour contrast (WCAG 1.4.3)

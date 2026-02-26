@@ -99,6 +99,54 @@ def _make_pdf(
     return out_path
 
 
+def _make_scanned_pdf(
+    tmp_path: str = "/tmp",
+    filename: str = "scanned.pdf",
+    add_text_layer: bool = False,
+    ocr_detectable: bool = True,
+) -> str:
+    """Create a PDF simulating a scanned document.
+
+    The page contains a full-page image.  When *ocr_detectable* is True the
+    image is rendered from text (so that OCR will find readable characters).
+    When False, the image is a plain colour rectangle that contains no text.
+
+    If *add_text_layer* is True, normal extractable text is also added to the
+    page (simulating a PDF that has already been OCR-processed).
+    """
+    # Step 1 — build a source page to render as an image
+    src = fitz.open()
+    src_page = src.new_page(width=595, height=842)
+    if ocr_detectable:
+        # Draw readable text so that OCR will detect it
+        src_page.insert_text(
+            (72, 100),
+            "This is a sample scanned document page that contains "
+            "readable text content for OCR testing purposes.",
+            fontsize=14,
+        )
+        src_page.insert_text((72, 140), "Second line of sample text.", fontsize=12)
+    else:
+        # Plain colour fill — no readable text
+        src_page.draw_rect(fitz.Rect(0, 0, 595, 842), fill=(0.95, 0.95, 0.95))
+    pix = src_page.get_pixmap()
+    png_bytes = pix.tobytes("png")
+    src.close()
+
+    # Step 2 — build the actual "scanned" PDF with the image
+    doc = fitz.open()
+    page = doc.new_page(width=595, height=842)
+    page.insert_image(fitz.Rect(0, 0, 595, 842), stream=png_bytes)
+
+    if add_text_layer:
+        page.insert_text((72, 100), "Extracted text layer.", fontsize=12)
+
+    out_path = os.path.join(tmp_path, filename)
+    doc.save(out_path)
+    doc.close()
+    return out_path
+
+
 # ---------------------------------------------------------------------------
 # Tests — WCAG 2.4.2 Document Title
 # ---------------------------------------------------------------------------
@@ -201,6 +249,62 @@ class TestImageAltText:
         analyzer.close()
         crits = [i for i in issues if i.wcag_criterion == "1.1.1"]
         assert not crits, "Expected no 1.1.1 issue when there are no images"
+
+    def test_full_page_image_with_text_not_flagged_as_image(self, tmp_path):
+        """A full-page image containing text (scanned page) should NOT
+        be flagged as 'Image Missing Alternative Text'."""
+        path = _make_scanned_pdf(tmp_path=str(tmp_path))
+        analyzer = PDFAccessibilityAnalyzer(path)
+        issues = analyzer.analyze()
+        analyzer.close()
+        img_issues = [i for i in issues if i.wcag_criterion == "1.1.1"]
+        assert not img_issues, (
+            "Full-page scanned text should not be flagged as an image missing alt text"
+        )
+
+    def test_full_page_image_with_existing_text_layer_not_flagged(self, tmp_path):
+        """A page with both a full-page image and extractable text (already
+        OCR'd) should NOT be flagged as an image issue."""
+        path = _make_scanned_pdf(tmp_path=str(tmp_path), add_text_layer=True)
+        analyzer = PDFAccessibilityAnalyzer(path)
+        issues = analyzer.analyze()
+        analyzer.close()
+        img_issues = [i for i in issues if i.wcag_criterion == "1.1.1"]
+        assert not img_issues, (
+            "Full-page image with existing text layer should not be flagged"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests — Scanned Content Detection
+# ---------------------------------------------------------------------------
+
+class TestScannedContent:
+    def test_scanned_page_flagged_for_ocr(self, tmp_path):
+        """A scanned page (full-page image, no text) should be flagged as
+        needing OCR and tagging."""
+        path = _make_scanned_pdf(tmp_path=str(tmp_path), ocr_detectable=False)
+        analyzer = PDFAccessibilityAnalyzer(path)
+        issues = analyzer.analyze()
+        analyzer.close()
+        scanned = [
+            i for i in issues
+            if i.element_info and i.element_info.get("type") == "scanned_page"
+        ]
+        assert scanned, "Expected a scanned-content issue for image-only page"
+        assert scanned[0].auto_fixable is True
+
+    def test_page_with_text_not_flagged_as_scanned(self, tmp_path):
+        """A page with normal text should not be flagged as scanned."""
+        path = _make_pdf(tmp_path=str(tmp_path))
+        analyzer = PDFAccessibilityAnalyzer(path)
+        issues = analyzer.analyze()
+        analyzer.close()
+        scanned = [
+            i for i in issues
+            if i.element_info and i.element_info.get("type") == "scanned_page"
+        ]
+        assert not scanned, "Normal text page should not be flagged as scanned"
 
 
 # ---------------------------------------------------------------------------
@@ -326,6 +430,38 @@ class TestRemediator:
         analyzer2.close()
         title_issues_after = [i for i in issues_after if i.wcag_criterion == "2.4.2"]
         assert not title_issues_after, "Title issue should be gone after fix"
+
+    def test_ocr_and_tag_adds_text_layer(self, tmp_path):
+        """perform_ocr_and_tag should add extractable text to a scanned PDF."""
+        path = _make_scanned_pdf(tmp_path=str(tmp_path), filename="ocr_test.pdf")
+
+        # Before OCR — no extractable text
+        doc = fitz.open(path)
+        text_before = doc[0].get_text("text").strip()
+        doc.close()
+        assert not text_before, "Scanned PDF should have no text before OCR"
+
+        # Run OCR & tag
+        remediator = PDFRemediator(path)
+        result = remediator.perform_ocr_and_tag()
+        remediator.close()
+
+        assert result["pages_ocrd"] >= 1, "At least one page should be OCR'd"
+
+        # After OCR — should now have extractable text
+        doc = fitz.open(path)
+        text_after = doc[0].get_text("text").strip()
+        doc.close()
+        assert text_after, "Scanned PDF should have extractable text after OCR"
+
+    def test_ocr_and_tag_returns_tag_count(self, tmp_path):
+        """perform_ocr_and_tag should return the number of tags added."""
+        path = _make_scanned_pdf(tmp_path=str(tmp_path), filename="tag_test.pdf")
+        remediator = PDFRemediator(path)
+        result = remediator.perform_ocr_and_tag()
+        remediator.close()
+        assert "tags_added" in result
+        assert "pages_ocrd" in result
 
 
 # ---------------------------------------------------------------------------

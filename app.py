@@ -172,6 +172,11 @@ def remediate(session_id: str):
             remediator.fix_document_language(new_lang)
             _sessions[session_id]["metadata"]["language"] = new_lang
 
+        elif action == "ocr_and_tag":
+            ocr_lang = payload.get("ocr_language", "eng").strip() or "eng"
+            result = remediator.perform_ocr_and_tag(language=ocr_lang)
+            _sessions[session_id]["ocr_result"] = result
+
         else:
             return jsonify({"error": f"Unknown action: {action}"}), 400
 
