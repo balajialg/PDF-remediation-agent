@@ -20,6 +20,9 @@ except ImportError:
 
 from .wcag_rules import WCAG_RULES, SCORED_CRITERIA
 
+# Minimum number of characters OCR must find to consider an image as text
+_MIN_OCR_TEXT_LENGTH = 20
+
 
 @dataclass
 class AccessibilityIssue:
@@ -470,7 +473,7 @@ class PDFAccessibilityAnalyzer:
                 pix = fitz.Pixmap(fitz.csRGB, pix)
             img = Image.open(io.BytesIO(pix.tobytes("png")))
             text = pytesseract.image_to_string(img).strip()
-            return len(text) > 20  # meaningful amount of text
+            return len(text) > _MIN_OCR_TEXT_LENGTH  # meaningful amount of text
         except Exception:
             return False
 

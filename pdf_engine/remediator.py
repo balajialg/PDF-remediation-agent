@@ -15,6 +15,9 @@ try:
 except ImportError:
     _OCR_AVAILABLE = False
 
+# Font size used for the invisible OCR text layer
+_OCR_TEXT_FONTSIZE = 11
+
 
 class PDFRemediator:
     """
@@ -79,9 +82,14 @@ class PDFRemediator:
 
         fd, tmp_path = tempfile.mkstemp(suffix=".pdf", dir=os.path.dirname(self.pdf_path))
         os.close(fd)
-        self.doc.save(tmp_path, deflate=True, garbage=3)
-        self.doc.close()
-        os.replace(tmp_path, self.pdf_path)
+        try:
+            self.doc.save(tmp_path, deflate=True, garbage=3)
+            self.doc.close()
+            os.replace(tmp_path, self.pdf_path)
+        except BaseException:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            raise
         self.doc = fitz.open(self.pdf_path)
 
         return {"pages_ocrd": pages_ocrd, "tags_added": tags_added}
@@ -124,7 +132,7 @@ class PDFRemediator:
             # so that it becomes searchable and readable by assistive tech.
             tw = fitz.TextWriter(page.rect)
             font = fitz.Font("helv")
-            fontsize = 11
+            fontsize = _OCR_TEXT_FONTSIZE
             x0 = page.rect.x0 + 36
             y = page.rect.y0 + 36
             max_width = page.rect.width - 72
@@ -159,9 +167,11 @@ class PDFRemediator:
     # ------------------------------------------------------------------
 
     def _auto_tag(self) -> int:
-        """Add basic structure tags derived from text analysis.
+        """Analyse text blocks and count structural elements (headings, paragraphs).
 
-        Returns the number of tag elements added.
+        The OCR text layer already makes content accessible to assistive
+        technology.  This method identifies structural elements for
+        informational purposes and returns the count of elements found.
         """
         tags_added = 0
         for page_num in range(self.doc.page_count):
@@ -191,10 +201,6 @@ class PDFRemediator:
                             tag = "P"
 
                         tags_added += 1
-                        # We record the tag decision; actual PDF structure-tree
-                        # manipulation requires a full rewrite which is beyond
-                        # in-place patching.  The OCR text layer already makes
-                        # the content accessible to assistive technology.
 
         return tags_added
 
