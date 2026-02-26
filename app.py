@@ -20,6 +20,7 @@ from werkzeug.utils import secure_filename
 
 from pdf_engine.analyzer import PDFAccessibilityAnalyzer
 from pdf_engine.remediator import PDFRemediator
+from pdf_engine.report_generator import generate_accessibility_report
 from pdf_engine.wcag_rules import WCAG_RULES
 
 # ---------------------------------------------------------------------------
@@ -102,6 +103,27 @@ def report(session_id: str):
         session_id=session_id,
         data=data,
         wcag_rules=WCAG_RULES,
+    )
+
+
+@app.route("/report/<session_id>/pdf")
+def report_pdf(session_id: str):
+    """Generate and serve a PDF report of the accessibility issues."""
+    if session_id not in _sessions:
+        return "Session not found", 404
+    data = _sessions[session_id]
+    pdf_bytes = generate_accessibility_report(
+        filename=data["filename"],
+        issues=data["issues"],
+        score=data["score"],
+        metadata=data["metadata"],
+        page_count=data["page_count"],
+    )
+    return send_file(
+        io.BytesIO(pdf_bytes),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=f"accessibility_report_{data['filename']}",
     )
 
 

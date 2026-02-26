@@ -50,6 +50,11 @@
   </div>
 
   <div class="ms-auto d-flex gap-2">
+    <a href="{{ url_for('report_pdf', session_id=session_id) }}"
+       class="btn btn-sm btn-outline-secondary"
+       aria-label="Download accessibility report as PDF">
+      <i class="bi bi-file-earmark-text me-1" aria-hidden="true"></i>Download Report
+    </a>
     <a href="{{ url_for('download', session_id=session_id) }}"
        class="btn btn-sm btn-outline-secondary"
        aria-label="Download remediated PDF">
